@@ -1,9 +1,13 @@
 package cfg
 
 import (
+	"fmt"
 	"io/ioutil"
 	"os"
 	"testing"
+
+	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/require"
 )
 
 func Test_ExampleApp_IsValid(t *testing.T) {
@@ -38,6 +42,87 @@ func Test_ExampleApp_WrittenAndReadCfgIsValid(t *testing.T) {
 	}
 
 	if err := rRead.Validate(); err != nil {
-		t.Error("validating conf from file failed: ", err)
+		t.Errorf("validating conf from file failed: %s\nFile Content: %+v", err, rRead)
+	}
+}
+
+func Test_AppHasOneTaskDefinition(t *testing.T) {
+	app := App{
+		Name: "testapp",
+	}
+
+	err := app.Validate()
+	assert.EqualError(t, err, "The Tasks section must define exactly 1 Task")
+
+	app = App{
+		Name: "testapp",
+		Tasks: []*Task{
+			&Task{},
+			&Task{},
+		},
+	}
+	err = app.Validate()
+	assert.EqualError(t, err, "The Tasks section must define exactly 1 Task")
+}
+
+func Test_OnlyBuildTaskAllowed(t *testing.T) {
+	testcases := []struct {
+		taskName   string
+		shouldFail bool
+	}{
+		{
+			taskName:   "check",
+			shouldFail: true,
+		},
+		{
+			taskName:   "test",
+			shouldFail: true,
+		},
+		{
+			taskName:   "",
+			shouldFail: true,
+		},
+		{
+			taskName:   "build",
+			shouldFail: false,
+		},
+	}
+
+	for _, testcase := range testcases {
+		t.Run(fmt.Sprintf("taskname %s", testcase.taskName), func(t *testing.T) {
+			app := App{
+				Name: "testapp",
+				Tasks: []*Task{
+					&Task{
+						Name:    testcase.taskName,
+						Command: "check",
+						Input: Input{
+							Files: FileInputs{
+								Paths: []string{"*.txt"},
+							},
+						},
+						Output: Output{
+							File: []*FileOutput{
+								{
+									Path: "test.tar",
+									FileCopy: FileCopy{
+										Path: "/tmp/",
+									},
+								},
+							},
+						},
+					},
+				},
+			}
+
+			err := app.Validate()
+			if testcase.shouldFail {
+				require.Error(t, err)
+				require.Contains(t, err.Error(), fmt.Sprintf("invalid task name"))
+				return
+			}
+
+			require.NoError(t, err)
+		})
 	}
 }

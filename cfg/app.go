@@ -11,20 +11,21 @@ import (
 
 // App stores an application configuration.
 type App struct {
-	Name  string `toml:"name" comment:"Name of the application"`
-	Build Build  `toml:"Build"`
+	Name  string  `toml:"name" comment:"Name of the application"`
+	Tasks []*Task `toml:"Task"`
 }
 
-// Build the build section
-type Build struct {
-	Command  string      `toml:"command" commented:"false" comment:"Command to build the application"`
-	Includes []string    `toml:"includes" comment:"Repository relative paths to baur include files that the build inherits.\n Valid variables: $ROOT"`
-	Input    BuildInput  `comment:"Specification of build inputs like source files, Makefiles, etc"`
-	Output   BuildOutput `comment:"Specification of build outputs produced by the [Build.command]"`
+// Task is a task section
+type Task struct {
+	Name     string   `toml:"name" comment:"Identifies the task, currently the name must be 'build'."`
+	Command  string   `toml:"command" commented:"false" comment:"Command that the task executes"`
+	Includes []string `toml:"includes" comment:"Repository relative paths to baur include files that the build inherits.\n Valid variables: $ROOT"`
+	Input    Input    `toml:"Input" comment:"Specification of task inputs like source files, Makefiles, etc"`
+	Output   Output   `toml:"Output" comment:"Specification of task outputs produced by the Task.command"`
 }
 
-// BuildInput contains information about build inputs
-type BuildInput struct {
+// Input contains information about task inputs
+type Input struct {
 	Files         FileInputs    `comment:"Inputs specified by file glob paths"`
 	GitFiles      GitFileInputs `comment:"Inputs specified by path, matching only Git tracked files"`
 	GolangSources GolangSources `comment:"Inputs specified by directories containing Golang applications"`
@@ -47,8 +48,8 @@ type GitFileInputs struct {
 	Paths []string `toml:"paths" commented:"true" comment:"Relative paths to source files.\n Only files tracked by Git that are not in the .gitignore file are matched.\n The same patterns that git ls-files supports can be used.\n Valid variables: $ROOT"`
 }
 
-// BuildOutput the build output section
-type BuildOutput struct {
+// Output the build output section
+type Output struct {
 	DockerImage []*DockerImageOutput `comment:"Docker images that are produced by the [Build.command]"`
 	File        []*FileOutput        `comment:"Files that are produces by the [Build.command]"`
 }
@@ -84,8 +85,8 @@ type DockerImageOutput struct {
 	RegistryUpload DockerImageRegistryUpload `comment:"Registry repository the image is uploaded to"`
 }
 
-func exampleBuildInput() BuildInput {
-	return BuildInput{
+func exampleBuildInput() Input {
+	return Input{
 		Files: FileInputs{
 			Paths: []string{"dbmigrations/*.sql"},
 		},
@@ -99,8 +100,8 @@ func exampleBuildInput() BuildInput {
 	}
 }
 
-func exampleBuildOutput() BuildOutput {
-	return BuildOutput{
+func exampleBuildOutput() Output {
+	return Output{
 		File: []*FileOutput{
 			{
 				Path: "dist/$APPNAME.tar.xz",
@@ -109,7 +110,6 @@ func exampleBuildOutput() BuildOutput {
 					DestFile: "$APPNAME-$GITCOMMIT.tar.xz",
 				},
 				FileCopy: FileCopy{
-
 					Path: "/mnt/fileserver/build_artifacts/$APPNAME-$GITCOMMIT.tar.xz",
 				},
 			},
@@ -131,10 +131,13 @@ func ExampleApp(name string) *App {
 	return &App{
 		Name: name,
 
-		Build: Build{
-			Command: "make dist",
-			Input:   exampleBuildInput(),
-			Output:  exampleBuildOutput(),
+		Tasks: []*Task{
+			&Task{
+				Name:    "build",
+				Command: "make dist",
+				Input:   exampleBuildInput(),
+				Output:  exampleBuildOutput(),
+			},
 		},
 	}
 }
@@ -155,7 +158,9 @@ func AppFromFile(path string) (*App, error) {
 		return nil, err
 	}
 
-	removeEmptySections(&config.Build.Output)
+	for _, task := range config.Tasks {
+		removeEmptySections(&task.Output)
+	}
 
 	return &config, err
 }
@@ -165,7 +170,7 @@ func AppFromFile(path string) (*App, error) {
 // It prevents that slices are commented in created Example configurations.
 // To prevent that we have empty elements in the slice that we process later and
 // validate, remove them from the config
-func removeEmptySections(buildOutput *BuildOutput) {
+func removeEmptySections(buildOutput *Output) {
 	fileOutputs := make([]*FileOutput, 0, len(buildOutput.File))
 	dockerImageOutputs := make([]*DockerImageOutput, 0, len(buildOutput.DockerImage))
 
@@ -201,33 +206,61 @@ func (a *App) Validate() error {
 		return errors.New("name parameter can not be empty")
 	}
 
-	return a.Build.Validate()
+	if len(a.Tasks) != 1 {
+		return errors.New("The Tasks section must define exactly 1 Task")
+	}
+
+	duplMap := make(map[string]struct{}, len(a.Tasks))
+
+	for _, task := range a.Tasks {
+		_, exist := duplMap[task.Name]
+		if exist {
+			return fmt.Errorf("Tasks section contains multiple tasks with the name '%s', task names must be unique", task.Name)
+		}
+		duplMap[task.Name] = struct{}{}
+
+		err := task.Validate()
+		if err != nil {
+			if task.Name == "" {
+				return errors.Wrap(err, "Task section contains errors")
+			}
+
+			return errors.Wrap(err, fmt.Sprintf("Task section %s contains errors", task.Name))
+		}
+	}
+
+	return nil
 }
 
 // Validate validates the build section
-func (b *Build) Validate() error {
-	if len(b.Command) == 0 {
+func (t *Task) Validate() error {
+	if len(t.Command) == 0 {
 		return nil
 	}
 
-	if err := b.Input.Validate(); err != nil {
-		return errors.Wrap(err, "[Build.Input] section contains errors")
+	// TODO: change it to check for an invalid name when we support multiple tasks
+	if t.Name != "build" {
+		return fmt.Errorf("invalid task name '%s', task name must be 'build'", t.Name)
 	}
 
-	if err := b.Output.Validate(); err != nil {
-		return errors.Wrap(err, "[Build.Output] section contains errors")
+	if err := t.Input.Validate(); err != nil {
+		return errors.Wrap(err, "Input section contains errors")
+	}
+
+	if err := t.Output.Validate(); err != nil {
+		return errors.Wrap(err, "Output section contains errors")
 	}
 
 	return nil
 }
 
 // Validate validates the BuildInput section
-func (b *BuildInput) Validate() error {
-	if err := b.Files.Validate(); err != nil {
+func (i *Input) Validate() error {
+	if err := i.Files.Validate(); err != nil {
 		return errors.Wrap(err, "Files")
 	}
 
-	if err := b.GolangSources.Validate(); err != nil {
+	if err := i.GolangSources.Validate(); err != nil {
 		return errors.Wrap(err, "GolangSources")
 	}
 
@@ -252,14 +285,14 @@ func (g *GolangSources) Validate() error {
 }
 
 // Validate validates the BuildOutput section
-func (b *BuildOutput) Validate() error {
-	for _, f := range b.File {
+func (o *Output) Validate() error {
+	for _, f := range o.File {
 		if err := f.Validate(); err != nil {
 			return errors.Wrap(err, "File")
 		}
 	}
 
-	for _, d := range b.DockerImage {
+	for _, d := range o.DockerImage {
 		if err := d.Validate(); err != nil {
 			return errors.Wrap(err, "DockerImage")
 		}
@@ -286,7 +319,7 @@ func (s *S3Upload) IsEmpty() bool {
 // Validate validates a [[Build.Output.File]] section
 func (f *FileOutput) Validate() error {
 	if len(f.Path) == 0 {
-		return errors.New("path parameter can not be unset or empty")
+		return errors.New("path can not be unset or empty")
 	}
 
 	return f.S3Upload.Validate()

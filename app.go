@@ -30,7 +30,7 @@ type App struct {
 	Outputs          []BuildOutput
 	totalInputDigest *digest.Digest
 
-	UnresolvedInputs []*cfg.BuildInput
+	UnresolvedInputs []*cfg.Input
 	buildInputs      []*File
 }
 
@@ -55,7 +55,7 @@ func replaceGitCommitVar(in string, r *Repository) (string, error) {
 	return strings.Replace(in, "$GITCOMMIT", commitID, -1), nil
 }
 
-func (a *App) addBuildOutput(buildOutput *cfg.BuildOutput) error {
+func (a *App) addBuildOutput(buildOutput *cfg.Output) error {
 	if err := a.addDockerBuildOutputs(buildOutput); err != nil {
 		return errors.Wrap(err, "error in DockerImage section")
 	}
@@ -67,7 +67,7 @@ func (a *App) addBuildOutput(buildOutput *cfg.BuildOutput) error {
 	return nil
 }
 
-func (a *App) addDockerBuildOutputs(buildOutput *cfg.BuildOutput) error {
+func (a *App) addDockerBuildOutputs(buildOutput *cfg.Output) error {
 	for _, di := range buildOutput.DockerImage {
 		tag, err := replaceGitCommitVar(di.RegistryUpload.Tag, a.Repository)
 		if err != nil {
@@ -87,7 +87,7 @@ func (a *App) addDockerBuildOutputs(buildOutput *cfg.BuildOutput) error {
 	return nil
 }
 
-func (a *App) addFileOutputs(buildOutput *cfg.BuildOutput) error {
+func (a *App) addFileOutputs(buildOutput *cfg.Output) error {
 	for _, f := range buildOutput.File {
 		filePath := replaceAppNameVar(f.Path, a.Name)
 		if !f.S3Upload.IsEmpty() {
@@ -147,7 +147,7 @@ func (a *App) include(inc *cfg.Include) error {
 }
 
 func (a *App) loadIncludes(appCfg *cfg.App) error {
-	for _, includePath := range appCfg.Build.Includes {
+	for _, includePath := range appCfg.Tasks[0].Includes {
 		path := replaceROOTvar(includePath, a.Repository)
 		if !filepath.IsAbs(path) {
 			path = filepath.Join(a.Path, path)
@@ -168,9 +168,9 @@ func (a *App) loadIncludes(appCfg *cfg.App) error {
 }
 
 func (a *App) addCfgsToBuildInputs(appCfg *cfg.App) {
-	buildInput := cfg.BuildInput{}
+	buildInput := cfg.Input{}
 	buildInput.Files.Paths = append(buildInput.Files.Paths, AppCfgFile)
-	buildInput.Files.Paths = append(buildInput.Files.Paths, appCfg.Build.Includes...)
+	buildInput.Files.Paths = append(buildInput.Files.Paths, appCfg.Tasks[0].Includes...)
 
 	a.UnresolvedInputs = append(a.UnresolvedInputs, &buildInput)
 }
@@ -190,6 +190,11 @@ func NewApp(repository *Repository, cfgPath string) (*App, error) {
 			cfgPath)
 	}
 
+	if len(appCfg.Tasks) != 1 {
+		// This is ensures by appCfg.Validate() function, this condition must be never true.
+		panic("app config does not contain exactly 1 task")
+	}
+
 	appAbsPath := path.Dir(cfgPath)
 	appRelPath, err := filepath.Rel(repository.Path, appAbsPath)
 	if err != nil {
@@ -201,15 +206,15 @@ func NewApp(repository *Repository, cfgPath string) (*App, error) {
 		Path:       path.Dir(cfgPath),
 		RelPath:    appRelPath,
 		Name:       appCfg.Name,
-		BuildCmd:   strings.TrimSpace(appCfg.Build.Command),
+		BuildCmd:   strings.TrimSpace(appCfg.Tasks[0].Command),
 	}
 
-	err = app.addBuildOutput(&appCfg.Build.Output)
+	err = app.addBuildOutput(&appCfg.Tasks[0].Output)
 	if err != nil {
 		return nil, errors.Wrapf(err, "%s: processing Build.Output section failed", app.Name)
 	}
 
-	app.UnresolvedInputs = []*cfg.BuildInput{&appCfg.Build.Input}
+	app.UnresolvedInputs = []*cfg.Input{&appCfg.Tasks[0].Input}
 	app.addCfgsToBuildInputs(appCfg)
 
 	err = app.loadIncludes(appCfg)

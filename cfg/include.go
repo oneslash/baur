@@ -9,8 +9,8 @@ import (
 
 // Include represents an include configuration file.
 type Include struct {
-	BuildInput  BuildInput
-	BuildOutput BuildOutput
+	BuildInput  Input
+	BuildOutput Output
 }
 
 // ExampleInclude returns an Include struct with exemplary values.
