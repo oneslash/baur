@@ -19,7 +19,7 @@ type App struct {
 type Task struct {
 	Name     string   `toml:"name" comment:"Identifies the task, currently the name must be 'build'."`
 	Command  string   `toml:"command" commented:"false" comment:"Command that the task executes"`
-	Includes []string `toml:"includes" comment:"Repository relative paths to baur include files that the build inherits.\n Valid variables: $ROOT"`
+	Includes []string `toml:"includes" comment:"Repository relative paths to baur include files that the task inherits.\n Valid variables: $ROOT"`
 	Input    Input    `toml:"Input" comment:"Specification of task inputs like source files, Makefiles, etc"`
 	Output   Output   `toml:"Output" comment:"Specification of task outputs produced by the Task.command"`
 }
@@ -48,10 +48,10 @@ type GitFileInputs struct {
 	Paths []string `toml:"paths" commented:"true" comment:"Relative paths to source files.\n Only files tracked by Git that are not in the .gitignore file are matched.\n The same patterns that git ls-files supports can be used.\n Valid variables: $ROOT"`
 }
 
-// Output the build output section
+// Output is the tasks output section
 type Output struct {
-	DockerImage []*DockerImageOutput `comment:"Docker images that are produced by the [Build.command]"`
-	File        []*FileOutput        `comment:"Files that are produces by the [Build.command]"`
+	DockerImage []*DockerImageOutput `comment:"Docker images that are produced by the [Task.command]"`
+	File        []*FileOutput        `comment:"Files that are produces by the [Task.command]"`
 }
 
 // FileOutput describes where a file artifact should be uploaded to
@@ -81,11 +81,11 @@ type S3Upload struct {
 
 // DockerImageOutput describes where a docker container is uploaded to
 type DockerImageOutput struct {
-	IDFile         string                    `toml:"idfile" comment:"Path to a file that is created by [Build.Command] and contains the image ID of the produced image (docker build --iidfile), valid variables: $APPNAME" commented:"true"`
+	IDFile         string                    `toml:"idfile" comment:"Path to a file that is created by [Task.Command] and contains the image ID of the produced image (docker build --iidfile), valid variables: $APPNAME" commented:"true"`
 	RegistryUpload DockerImageRegistryUpload `comment:"Registry repository the image is uploaded to"`
 }
 
-func exampleBuildInput() Input {
+func exampleInput() Input {
 	return Input{
 		Files: FileInputs{
 			Paths: []string{"dbmigrations/*.sql"},
@@ -100,7 +100,7 @@ func exampleBuildInput() Input {
 	}
 }
 
-func exampleBuildOutput() Output {
+func exampleOutput() Output {
 	return Output{
 		File: []*FileOutput{
 			{
@@ -135,8 +135,8 @@ func ExampleApp(name string) *App {
 			&Task{
 				Name:    "build",
 				Command: "make dist",
-				Input:   exampleBuildInput(),
-				Output:  exampleBuildOutput(),
+				Input:   exampleInput(),
+				Output:  exampleOutput(),
 			},
 		},
 	}
@@ -170,11 +170,11 @@ func AppFromFile(path string) (*App, error) {
 // It prevents that slices are commented in created Example configurations.
 // To prevent that we have empty elements in the slice that we process later and
 // validate, remove them from the config
-func removeEmptySections(buildOutput *Output) {
-	fileOutputs := make([]*FileOutput, 0, len(buildOutput.File))
-	dockerImageOutputs := make([]*DockerImageOutput, 0, len(buildOutput.DockerImage))
+func removeEmptySections(output *Output) {
+	fileOutputs := make([]*FileOutput, 0, len(output.File))
+	dockerImageOutputs := make([]*DockerImageOutput, 0, len(output.DockerImage))
 
-	for _, f := range buildOutput.File {
+	for _, f := range output.File {
 		if f.IsEmpty() {
 			continue
 		}
@@ -182,7 +182,7 @@ func removeEmptySections(buildOutput *Output) {
 		fileOutputs = append(fileOutputs, f)
 	}
 
-	for _, d := range buildOutput.DockerImage {
+	for _, d := range output.DockerImage {
 		if d.IsEmpty() {
 			continue
 		}
@@ -190,8 +190,8 @@ func removeEmptySections(buildOutput *Output) {
 		dockerImageOutputs = append(dockerImageOutputs, d)
 	}
 
-	buildOutput.File = fileOutputs
-	buildOutput.DockerImage = dockerImageOutputs
+	output.File = fileOutputs
+	output.DockerImage = dockerImageOutputs
 }
 
 // ToFile writes an exemplary Application configuration file to
@@ -232,7 +232,7 @@ func (a *App) Validate() error {
 	return nil
 }
 
-// Validate validates the build section
+// Validate validates the task section
 func (t *Task) Validate() error {
 	if len(t.Command) == 0 {
 		return nil
@@ -254,7 +254,7 @@ func (t *Task) Validate() error {
 	return nil
 }
 
-// Validate validates the BuildInput section
+// Validate validates the Input section
 func (i *Input) Validate() error {
 	if err := i.Files.Validate(); err != nil {
 		return errors.Wrap(err, "Files")
@@ -284,7 +284,7 @@ func (g *GolangSources) Validate() error {
 	return nil
 }
 
-// Validate validates the BuildOutput section
+// Validate validates the Output section
 func (o *Output) Validate() error {
 	for _, f := range o.File {
 		if err := f.Validate(); err != nil {
@@ -316,7 +316,7 @@ func (s *S3Upload) IsEmpty() bool {
 	return len(s.Bucket) == 0 && len(s.DestFile) == 0
 }
 
-// Validate validates a [[Build.Output.File]] section
+// Validate validates a [[Task.Output.File]] section
 func (f *FileOutput) Validate() error {
 	if len(f.Path) == 0 {
 		return errors.New("path can not be unset or empty")
@@ -336,7 +336,7 @@ func (d *DockerImageOutput) IsEmpty() bool {
 
 }
 
-// Validate validates a [[Build.Output.File]] section
+// Validate validates a [[Task.Output.File]] section
 func (s *S3Upload) Validate() error {
 	if s.IsEmpty() {
 		return nil

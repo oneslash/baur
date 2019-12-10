@@ -16,8 +16,8 @@ type Include struct {
 // ExampleInclude returns an Include struct with exemplary values.
 func ExampleInclude() *Include {
 	return &Include{
-		Input:  exampleBuildInput(),
-		Output: exampleBuildOutput(),
+		Input:  exampleInput(),
+		Output: exampleOutput(),
 	}
 }
 
@@ -48,11 +48,11 @@ func IncludeFromFile(path string) (*Include, error) {
 // Validate validates an Include configuration struct.
 func (in *Include) Validate() error {
 	if err := in.Input.Validate(); err != nil {
-		return errors.Wrap(err, "[BuildInput] section contains errors")
+		return errors.Wrap(err, "[Input] section contains errors")
 	}
 
 	if err := in.Output.Validate(); err != nil {
-		return errors.Wrap(err, "[BuildOutput] section contains errors")
+		return errors.Wrap(err, "[Output] section contains errors")
 	}
 
 	return nil
