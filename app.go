@@ -141,9 +141,9 @@ func (a *App) addFileOutputs(buildOutput *cfg.Output) error {
 }
 
 func (a *App) include(inc *cfg.Include) error {
-	a.UnresolvedInputs = append(a.UnresolvedInputs, &inc.BuildInput)
+	a.UnresolvedInputs = append(a.UnresolvedInputs, &inc.Input)
 
-	return a.addBuildOutput(&inc.BuildOutput)
+	return a.addBuildOutput(&inc.Output)
 }
 
 func (a *App) loadIncludes(appCfg *cfg.App) error {

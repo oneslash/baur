@@ -9,15 +9,15 @@ import (
 
 // Include represents an include configuration file.
 type Include struct {
-	BuildInput  Input
-	BuildOutput Output
+	Input  Input
+	Output Output
 }
 
 // ExampleInclude returns an Include struct with exemplary values.
 func ExampleInclude() *Include {
 	return &Include{
-		BuildInput:  exampleBuildInput(),
-		BuildOutput: exampleBuildOutput(),
+		Input:  exampleBuildInput(),
+		Output: exampleBuildOutput(),
 	}
 }
 
@@ -40,18 +40,18 @@ func IncludeFromFile(path string) (*Include, error) {
 		return nil, err
 	}
 
-	removeEmptySections(&config.BuildOutput)
+	removeEmptySections(&config.Output)
 
 	return &config, err
 }
 
 // Validate validates an Include configuration struct.
 func (in *Include) Validate() error {
-	if err := in.BuildInput.Validate(); err != nil {
+	if err := in.Input.Validate(); err != nil {
 		return errors.Wrap(err, "[BuildInput] section contains errors")
 	}
 
-	if err := in.BuildOutput.Validate(); err != nil {
+	if err := in.Output.Validate(); err != nil {
 		return errors.Wrap(err, "[BuildOutput] section contains errors")
 	}
 
