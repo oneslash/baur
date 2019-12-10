@@ -140,44 +140,16 @@ func (a *App) addFileOutputs(buildOutput *cfg.Output) error {
 	return nil
 }
 
-func (a *App) include(inc *cfg.Include) error {
-	a.UnresolvedInputs = append(a.UnresolvedInputs, &inc.Input)
-
-	return a.addBuildOutput(&inc.Output)
-}
-
-func (a *App) loadIncludes(appCfg *cfg.App) error {
-	for _, includePath := range appCfg.Tasks[0].Includes {
-		path := replaceROOTvar(includePath, a.Repository)
-		if !filepath.IsAbs(path) {
-			path = filepath.Join(a.Path, path)
-		}
-
-		inc, err := a.Repository.includeCache.load(path)
-		if err != nil {
-			return errors.Wrapf(err, "loading include '%s' failed", includePath)
-		}
-
-		err = a.include(inc)
-		if err != nil {
-			return errors.Wrapf(err, "including '%s' failed", includePath)
-		}
-	}
-
-	return nil
-}
-
 func (a *App) addCfgsToBuildInputs(appCfg *cfg.App) {
 	buildInput := cfg.Input{}
 	buildInput.Files.Paths = append(buildInput.Files.Paths, AppCfgFile)
-	buildInput.Files.Paths = append(buildInput.Files.Paths, appCfg.Tasks[0].Includes...)
 
 	a.UnresolvedInputs = append(a.UnresolvedInputs, &buildInput)
 }
 
 // NewApp reads the configuration file and returns a new App
 func NewApp(repository *Repository, cfgPath string) (*App, error) {
-	appCfg, err := cfg.AppFromFile(cfgPath)
+	appCfg, err := repository.AppLoader.Load(cfgPath)
 	if err != nil {
 		return nil, errors.Wrapf(err,
 			"reading application config %s failed", cfgPath)
@@ -216,11 +188,6 @@ func NewApp(repository *Repository, cfgPath string) (*App, error) {
 
 	app.UnresolvedInputs = []*cfg.Input{&appCfg.Tasks[0].Input}
 	app.addCfgsToBuildInputs(appCfg)
-
-	err = app.loadIncludes(appCfg)
-	if err != nil {
-		return nil, errors.Wrapf(err, "%s: processing application config failed failed", app.Name)
-	}
 
 	return &app, nil
 }

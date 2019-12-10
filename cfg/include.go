@@ -9,6 +9,7 @@ import (
 
 // Include represents an include configuration file.
 type Include struct {
+	ID     string `toml:"id" comment:"identifier for the include"`
 	Input  Input
 	Output Output
 }
@@ -40,13 +41,17 @@ func IncludeFromFile(path string) (*Include, error) {
 		return nil, err
 	}
 
-	removeEmptySections(&config.Output)
+	config.Output.removeEmptySections()
 
 	return &config, err
 }
 
 // Validate validates an Include configuration struct.
 func (in *Include) Validate() error {
+	if in.ID == "" {
+		return errors.New("id can not be empty")
+	}
+
 	if err := in.Input.Validate(); err != nil {
 		return errors.Wrap(err, "[Input] section contains errors")
 	}

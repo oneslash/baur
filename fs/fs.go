@@ -193,3 +193,78 @@ func FileSize(path string) (int64, error) {
 func Mkdir(path string) error {
 	return os.MkdirAll(path, os.FileMode(0755))
 }
+
+// TODO: if we do not have a usecase for SymlinkMode remove the enum and only
+// support the mode that we use.
+
+// SymlinkMode defines how symlinks are handled
+type SymlinkMode int
+
+const (
+	// SymlinksFollow symlinks are dereferenced and followed.
+	SymlinksFollow SymlinkMode = iota
+
+	// SymlinksAreErrors when a symlink is found an error is returned.
+	SymlinksAreErrors
+)
+
+// WalkFiles recursively walks to the passed root directory, calling walkFunc for each found file.
+// When an error is encountered the function aborts and returns the error.
+func WalkFiles(root string, mode SymlinkMode, walkFilesFunc func(path string, info os.FileInfo) error) error {
+	var walkFunc filepath.WalkFunc
+
+	walkFunc = func(path string, info os.FileInfo, err error) error {
+		if err != nil {
+			return errors.Wrap(err, path)
+		}
+
+		if path == root {
+			return nil
+		}
+
+		if info.Mode()&os.ModeSymlink != 0 {
+			switch mode {
+			case SymlinksFollow:
+				path, err = filepath.EvalSymlinks(path)
+				if err != nil {
+					return errors.Wrap(err, "resolving symlink failed")
+				}
+
+				info, err = os.Stat(path)
+				if err != nil {
+					return errors.Wrapf(err, "stat %q failed", path)
+				}
+
+			case SymlinksAreErrors:
+				return fmt.Errorf("%q is a symlink", path)
+			}
+		}
+
+		if info.IsDir() {
+			return filepath.Walk(path, walkFunc)
+		}
+
+		err = walkFilesFunc(path, info)
+		if err != nil {
+			return err
+		}
+
+		return nil
+	}
+
+	return filepath.Walk(root, walkFunc)
+}
+
+// AbsPaths prepends to all paths in relPaths the passed rootPath.
+func AbsPaths(rootPath string, relPaths []string) []string {
+	result := make([]string, 0, len(rootPath))
+
+	for _, relPath := range relPaths {
+		absPath := filepath.Join(rootPath, relPath)
+		absPath = filepath.Clean(absPath)
+
+		result = append(result, absPath)
+	}
+
+	return result
+}

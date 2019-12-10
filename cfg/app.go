@@ -19,7 +19,7 @@ type App struct {
 type Task struct {
 	Name     string   `toml:"name" comment:"Identifies the task, currently the name must be 'build'."`
 	Command  string   `toml:"command" commented:"false" comment:"Command that the task executes"`
-	Includes []string `toml:"includes" comment:"Repository relative paths to baur include files that the task inherits.\n Valid variables: $ROOT"`
+	Includes []string `toml:"includes" comment:"IDs of include that the task inherits.\n"`
 	Input    Input    `toml:"Input" comment:"Specification of task inputs like source files, Makefiles, etc"`
 	Output   Output   `toml:"Output" comment:"Specification of task outputs produced by the Task.command"`
 }
@@ -159,7 +159,7 @@ func AppFromFile(path string) (*App, error) {
 	}
 
 	for _, task := range config.Tasks {
-		removeEmptySections(&task.Output)
+		task.Output.removeEmptySections()
 	}
 
 	return &config, err
@@ -170,11 +170,11 @@ func AppFromFile(path string) (*App, error) {
 // It prevents that slices are commented in created Example configurations.
 // To prevent that we have empty elements in the slice that we process later and
 // validate, remove them from the config
-func removeEmptySections(output *Output) {
-	fileOutputs := make([]*FileOutput, 0, len(output.File))
-	dockerImageOutputs := make([]*DockerImageOutput, 0, len(output.DockerImage))
+func (o *Output) removeEmptySections() {
+	fileOutputs := make([]*FileOutput, 0, len(o.File))
+	dockerImageOutputs := make([]*DockerImageOutput, 0, len(o.DockerImage))
 
-	for _, f := range output.File {
+	for _, f := range o.File {
 		if f.IsEmpty() {
 			continue
 		}
@@ -182,7 +182,7 @@ func removeEmptySections(output *Output) {
 		fileOutputs = append(fileOutputs, f)
 	}
 
-	for _, d := range output.DockerImage {
+	for _, d := range o.DockerImage {
 		if d.IsEmpty() {
 			continue
 		}
@@ -190,8 +190,8 @@ func removeEmptySections(output *Output) {
 		dockerImageOutputs = append(dockerImageOutputs, d)
 	}
 
-	output.File = fileOutputs
-	output.DockerImage = dockerImageOutputs
+	o.File = fileOutputs
+	o.DockerImage = dockerImageOutputs
 }
 
 // ToFile writes an exemplary Application configuration file to
@@ -254,6 +254,19 @@ func (t *Task) Validate() error {
 	return nil
 }
 
+// Merge merges the task with information in the Include.
+func (t *Task) Merge(include *Include) {
+	t.Input.Merge(&include.Input)
+	t.Output.Merge(&include.Output)
+}
+
+// Merge merges the Input with another one.
+func (i *Input) Merge(other *Input) {
+	i.Files.Merge(&other.Files)
+	i.GitFiles.Merge(&other.GitFiles)
+	i.GolangSources.Merge(&other.GolangSources)
+}
+
 // Validate validates the Input section
 func (i *Input) Validate() error {
 	if err := i.Files.Validate(); err != nil {
@@ -282,6 +295,18 @@ func (g *GolangSources) Validate() error {
 	}
 
 	return nil
+}
+
+// Merge merges the two GolangSources structs
+func (g *GolangSources) Merge(other *GolangSources) {
+	g.Paths = append(g.Paths, other.Paths...)
+	g.Environment = append(g.Environment, other.Environment...)
+}
+
+// Merge merges the two Output structs
+func (o *Output) Merge(other *Output) {
+	o.DockerImage = append(o.DockerImage, other.DockerImage...)
+	o.File = append(o.File, other.File...)
 }
 
 // Validate validates the Output section
@@ -379,6 +404,11 @@ func (d *DockerImageRegistryUpload) Validate() error {
 	return nil
 }
 
+// Merge merges 2 FileInputs structs
+func (f *FileInputs) Merge(other *FileInputs) {
+	f.Paths = append(f.Paths, other.Paths...)
+}
+
 // Validate validates a [[Sources.Files]] section
 func (f *FileInputs) Validate() error {
 	for _, path := range f.Paths {
@@ -391,4 +421,9 @@ func (f *FileInputs) Validate() error {
 	}
 
 	return nil
+}
+
+// Merge merges two GitFileInputs structs
+func (g *GitFileInputs) Merge(other *GitFileInputs) {
+	g.Paths = append(g.Paths, other.Paths...)
 }

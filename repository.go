@@ -21,7 +21,7 @@ type Repository struct {
 	gitCommitID        string
 	gitWorktreeIsDirty *bool
 	PSQLURL            string
-	includeCache       *includeCache
+	AppLoader          cfg.AppLoader
 }
 
 // FindRepository searches for a repository config file. The search starts in
@@ -49,13 +49,13 @@ func FindRepositoryCwd() (*Repository, error) {
 
 // NewRepository reads the configuration file and returns a Repository
 func NewRepository(cfgPath string) (*Repository, error) {
-	cfg, err := cfg.RepositoryFromFile(cfgPath)
+	repoCfg, err := cfg.RepositoryFromFile(cfgPath)
 	if err != nil {
 		return nil, errors.Wrapf(err,
 			"reading repository config %s failed", cfgPath)
 	}
 
-	err = cfg.Validate()
+	err = repoCfg.Validate()
 	if err != nil {
 		return nil, errors.Wrapf(err,
 			"validating repository config %q failed", cfgPath)
@@ -64,10 +64,9 @@ func NewRepository(cfgPath string) (*Repository, error) {
 	r := Repository{
 		CfgPath:       cfgPath,
 		Path:          path.Dir(cfgPath),
-		AppSearchDirs: fs.PathsJoin(path.Dir(cfgPath), cfg.Discover.Dirs),
-		SearchDepth:   cfg.Discover.SearchDepth,
-		PSQLURL:       cfg.Database.PGSQLURL,
-		includeCache:  newIncludeCache(),
+		AppSearchDirs: fs.PathsJoin(path.Dir(cfgPath), repoCfg.Discover.Dirs),
+		SearchDepth:   repoCfg.Discover.SearchDepth,
+		PSQLURL:       repoCfg.Database.PGSQLURL,
 	}
 
 	err = fs.DirsExist(r.AppSearchDirs...)
@@ -75,6 +74,17 @@ func NewRepository(cfgPath string) (*Repository, error) {
 		return nil, errors.Wrapf(err, "validating repository config %q failed, "+
 			"application_dirs parameter is invalid", cfgPath)
 	}
+
+	includeDB := cfg.IncludeDB{}
+	err = includeDB.Load(fs.AbsPaths(r.Path, repoCfg.IncludeDirs)...)
+	if err != nil {
+		return nil, errors.Wrap(err, "loading includes failed")
+	}
+
+	// TODO: we should release the memory when it's not used anymore,
+	// either empty the db when it's not used anymore or store it somewhere
+	// else then in the Repository struct
+	r.AppLoader = cfg.AppLoader{IncludeDB: includeDB}
 
 	return &r, nil
 }
