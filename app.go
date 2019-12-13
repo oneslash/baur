@@ -181,12 +181,12 @@ func NewApp(repository *Repository, cfgPath string) (*App, error) {
 		BuildCmd:   strings.TrimSpace(appCfg.Tasks[0].Command),
 	}
 
-	err = app.addBuildOutput(&appCfg.Tasks[0].Output)
+	err = app.addBuildOutput(appCfg.Tasks[0].Output)
 	if err != nil {
 		return nil, errors.Wrapf(err, "%s: processing Build.Output section failed", app.Name)
 	}
 
-	app.UnresolvedInputs = []*cfg.Input{&appCfg.Tasks[0].Input}
+	app.UnresolvedInputs = []*cfg.Input{appCfg.Tasks[0].Input}
 	app.addCfgsToBuildInputs(appCfg)
 
 	return &app, nil

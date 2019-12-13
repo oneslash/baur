@@ -11,12 +11,24 @@ import (
 )
 
 // IncludeDB loads and stores include config files
-type IncludeDB map[string]*Include
+type IncludeDB struct {
+	Inputs  map[string]*InputInclude
+	Outputs map[string]*OutputInclude
+	Tasks   map[string]*TasksInclude
+}
+
+func NewIncludeDB() *IncludeDB {
+	return &IncludeDB{
+		Inputs:  map[string]*InputInclude{},
+		Outputs: map[string]*OutputInclude{},
+		Tasks:   map[string]*TasksInclude{},
+	}
+}
 
 // Load reads and validates all *.toml files in the passed includeDirectories
 // as include config files and adds them to the database.
 // Directories are searched recursively and symlinks are followed.
-func (l IncludeDB) Load(includeDirectory ...string) error {
+func (db IncludeDB) Load(includeDirectory ...string) error {
 	walkFunc := func(path string, _ os.FileInfo) error {
 		if filepath.Ext(path) != ".toml" {
 			return nil
@@ -32,7 +44,7 @@ func (l IncludeDB) Load(includeDirectory ...string) error {
 			return errors.Wrapf(err, "validating include config %q failed", path)
 		}
 
-		if err := l.add(include); err != nil {
+		if err := db.add(include); err != nil {
 			return err
 		}
 
@@ -46,15 +58,51 @@ func (l IncludeDB) Load(includeDirectory ...string) error {
 		}
 	}
 
+	for _, tasks := range db.Tasks {
+		for _, task := range tasks.Tasks {
+			if err := task.Merge(db); err != nil {
+				return err
+			}
+		}
+	}
+
 	return nil
 }
 
-func (l IncludeDB) add(include *Include) error {
-	if _, exist := l[include.ID]; exist {
-		return fmt.Errorf("multiple includes with id '%s' exist, include ids must be unique", include.ID)
+func (db IncludeDB) InputIncludeExist(id string) bool {
+	_, exist := db.Inputs[id]
+	return exist
+}
+
+func (db IncludeDB) OutputIncludeExist(id string) bool {
+	_, exist := db.Outputs[id]
+	return exist
+}
+
+func (db IncludeDB) add(include *Include) error {
+	for _, input := range include.Inputs {
+		if db.InputIncludeExist(input.ID) || db.OutputIncludeExist(input.ID) {
+			return fmt.Errorf("multiple input/output includes with id '%s' are defined, include/output ids must be unique", input.ID)
+		}
+
+		db.Inputs[input.ID] = input
 	}
 
-	l[include.ID] = include
+	for _, output := range include.Outputs {
+		if db.InputIncludeExist(output.ID) || db.OutputIncludeExist(output.ID) {
+			return fmt.Errorf("multiple input/output includes with id '%s' are defined, include/output ids must be unique", output.ID)
+		}
+
+		db.Outputs[output.ID] = output
+	}
+
+	for _, tasks := range include.Tasks {
+		if _, exist := db.Tasks[tasks.ID]; exist {
+			return fmt.Errorf("multiple tasks includes with id '%s' are defined, include ids must be unique", tasks.ID)
+		}
+
+		db.Tasks[tasks.ID] = tasks
+	}
 
 	return nil
 }

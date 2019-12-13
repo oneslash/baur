@@ -5,7 +5,6 @@ import (
 	"io/ioutil"
 
 	"github.com/pelletier/go-toml"
-	"github.com/pkg/errors"
 )
 
 const (
@@ -82,17 +81,23 @@ func (r *Repository) ToFile(filepath string, overwrite bool) error {
 // Validate validates a repository configuration
 func (r *Repository) Validate() error {
 	if r.ConfigVersion == 0 {
-		return fmt.Errorf("config_version value is unset or 0")
+		return &ValidationError{
+			ElementPath: []string{"config_version"},
+			Message:     "can not be unset or 0",
+		}
 	}
 	if r.ConfigVersion != configVersion {
-		return fmt.Errorf("incompatible configuration files\n"+
-			"config_version value is %d, expecting version: %d\n"+
-			"Update your baur configuration files or downgrade baur.", r.ConfigVersion, configVersion)
+		return &ValidationError{
+			ElementPath: []string{"config_version"},
+			Message: fmt.Sprintf("incompatible configuration files\n"+
+				"config_version value is %d, expecting version: %d\n"+
+				"Update your baur configuration files or downgrade baur.", r.ConfigVersion, configVersion),
+		}
 	}
 
 	err := r.Discover.Validate()
 	if err != nil {
-		return errors.Wrap(err, "[Discover] section contains errors")
+		return PrependValidationErrorPath(err, "Discover")
 	}
 
 	return nil
@@ -101,12 +106,18 @@ func (r *Repository) Validate() error {
 // Validate validates the Discover section and sets defaults.
 func (d *Discover) Validate() error {
 	if len(d.Dirs) == 0 {
-		return errors.New("application_dirs parameter is empty")
+		return &ValidationError{
+			ElementPath: []string{"application_dirs"},
+			Message:     "can not be empty",
+		}
 	}
 
 	if d.SearchDepth < minSearchDepth || d.SearchDepth > maxSearchDepth {
-		return fmt.Errorf("search_depth parameter must be in range (%d, %d]",
-			minSearchDepth, maxSearchDepth)
+		return &ValidationError{
+			ElementPath: []string{"search_depth"},
+			Message: fmt.Sprintf("search_depth parameter must be in range (%d, %d]",
+				minSearchDepth, maxSearchDepth),
+		}
 	}
 
 	return nil

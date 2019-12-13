@@ -1,11 +1,34 @@
 package cfg
 
 import (
+	"fmt"
 	"os"
+	"strings"
 
 	"github.com/pelletier/go-toml"
 	"github.com/pkg/errors"
 )
+
+type ValidationError struct {
+	ElementPath []string
+	Message     string
+}
+
+func (v *ValidationError) Error() string {
+	return fmt.Sprintf("%s: %s", strings.Join(v.ElementPath, "."), v.Message)
+}
+
+// PrependValidationErrorpath if the passed error has the *ValidationError, the
+// passed path is prepended to it's ElementPath field.
+// The function returns the passed validationError.
+func PrependValidationErrorPath(validationError error, path ...string) error {
+	valError, ok := validationError.(*ValidationError)
+	if ok {
+		valError.ElementPath = append(path, valError.ElementPath...)
+	}
+
+	return validationError
+}
 
 // toFile serializes a struct to TOML format and writes it to a file.
 func toFile(data interface{}, filepath string, overwrite bool) error {

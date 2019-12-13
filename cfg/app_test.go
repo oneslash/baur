@@ -96,12 +96,12 @@ func Test_OnlyBuildTaskAllowed(t *testing.T) {
 					&Task{
 						Name:    testcase.taskName,
 						Command: "check",
-						Input: Input{
+						Input: &Input{
 							Files: FileInputs{
 								Paths: []string{"*.txt"},
 							},
 						},
-						Output: Output{
+						Output: &Output{
 							File: []*FileOutput{
 								{
 									Path: "test.tar",

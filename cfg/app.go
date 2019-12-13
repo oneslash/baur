@@ -6,22 +6,24 @@ import (
 	"strings"
 
 	"github.com/pelletier/go-toml"
-	"github.com/pkg/errors"
 )
+
+type Tasks []*Task
 
 // App stores an application configuration.
 type App struct {
-	Name  string  `toml:"name" comment:"Name of the application"`
-	Tasks []*Task `toml:"Task"`
+	Name     string   `toml:"name" comment:"Name of the application"`
+	Includes []string `toml:"includes" comment:"IDs of Tasks includes that the task inherits."`
+	Tasks    Tasks    `toml:"Task"`
 }
 
 // Task is a task section
 type Task struct {
 	Name     string   `toml:"name" comment:"Identifies the task, currently the name must be 'build'."`
-	Command  string   `toml:"command" commented:"false" comment:"Command that the task executes"`
-	Includes []string `toml:"includes" comment:"IDs of include that the task inherits.\n"`
-	Input    Input    `toml:"Input" comment:"Specification of task inputs like source files, Makefiles, etc"`
-	Output   Output   `toml:"Output" comment:"Specification of task outputs produced by the Task.command"`
+	Command  string   `toml:"command" comment:"Command that the task executes"`
+	Includes []string `toml:"includes" comment:"IDs of input or output includes that the task inherits."`
+	Input    *Input   `toml:"Input" comment:"Specification of task inputs like source files, Makefiles, etc"`
+	Output   *Output  `toml:"Output" comment:"Specification of task outputs produced by the Task.command"`
 }
 
 // Input contains information about task inputs
@@ -85,8 +87,8 @@ type DockerImageOutput struct {
 	RegistryUpload DockerImageRegistryUpload `comment:"Registry repository the image is uploaded to"`
 }
 
-func exampleInput() Input {
-	return Input{
+func exampleInput() *Input {
+	return &Input{
 		Files: FileInputs{
 			Paths: []string{"dbmigrations/*.sql"},
 		},
@@ -100,8 +102,8 @@ func exampleInput() Input {
 	}
 }
 
-func exampleOutput() Output {
-	return Output{
+func exampleOutput() *Output {
+	return &Output{
 		File: []*FileOutput{
 			{
 				Path: "dist/$APPNAME.tar.xz",
@@ -159,7 +161,9 @@ func AppFromFile(path string) (*App, error) {
 	}
 
 	for _, task := range config.Tasks {
-		task.Output.removeEmptySections()
+		if (task.Output) != nil {
+			task.Output.removeEmptySections()
+		}
 	}
 
 	return &config, err
@@ -175,18 +179,10 @@ func (o *Output) removeEmptySections() {
 	dockerImageOutputs := make([]*DockerImageOutput, 0, len(o.DockerImage))
 
 	for _, f := range o.File {
-		if f.IsEmpty() {
-			continue
-		}
-
 		fileOutputs = append(fileOutputs, f)
 	}
 
 	for _, d := range o.DockerImage {
-		if d.IsEmpty() {
-			continue
-		}
-
 		dockerImageOutputs = append(dockerImageOutputs, d)
 	}
 
@@ -203,29 +199,45 @@ func (a *App) ToFile(filepath string) error {
 // Validate validates a App configuration
 func (a *App) Validate() error {
 	if len(a.Name) == 0 {
-		return errors.New("name parameter can not be empty")
+		return &ValidationError{
+			ElementPath: []string{"name"},
+			Message:     "can not be empty",
+		}
 	}
 
-	if len(a.Tasks) != 1 {
-		return errors.New("The Tasks section must define exactly 1 Task")
+	if err := a.Tasks.Validate(); err != nil {
+		return PrependValidationErrorPath(err, "Tasks")
 	}
 
-	duplMap := make(map[string]struct{}, len(a.Tasks))
+	return nil
+}
 
-	for _, task := range a.Tasks {
+func (tasks Tasks) Validate() error {
+	if len(tasks) != 1 {
+		return &ValidationError{
+			Message: fmt.Sprintf("must contain exactly 1 Task definition, has %d", len(tasks)),
+		}
+	}
+
+	duplMap := make(map[string]struct{}, len(tasks))
+
+	for _, task := range tasks {
 		_, exist := duplMap[task.Name]
 		if exist {
-			return fmt.Errorf("Tasks section contains multiple tasks with the name '%s', task names must be unique", task.Name)
+			return &ValidationError{
+				ElementPath: []string{"Task", "name"},
+				Message:     fmt.Sprintf("multiple tasks with name '%s' exist, task names must be unique", task.Name),
+			}
 		}
 		duplMap[task.Name] = struct{}{}
 
 		err := task.Validate()
 		if err != nil {
 			if task.Name == "" {
-				return errors.Wrap(err, "Task section contains errors")
+				return PrependValidationErrorPath(err, "Task")
 			}
 
-			return errors.Wrap(err, fmt.Sprintf("Task section %s contains errors", task.Name))
+			return PrependValidationErrorPath(err, fmt.Sprintf("Task(name: %s)", task.Name))
 		}
 	}
 
@@ -235,29 +247,80 @@ func (a *App) Validate() error {
 // Validate validates the task section
 func (t *Task) Validate() error {
 	if len(t.Command) == 0 {
-		return nil
+		return &ValidationError{
+			ElementPath: []string{"command"},
+			Message:     fmt.Sprintf("can not be empty"),
+		}
 	}
 
 	// TODO: change it to check for an invalid name when we support multiple tasks
 	if t.Name != "build" {
-		return fmt.Errorf("invalid task name '%s', task name must be 'build'", t.Name)
+		return &ValidationError{
+			ElementPath: []string{"name"},
+			Message:     "name must be 'build'",
+		}
+	}
+
+	if t.Input == nil {
+		return &ValidationError{
+			ElementPath: []string{"Input"},
+			Message:     "section is empty",
+		}
 	}
 
 	if err := t.Input.Validate(); err != nil {
-		return errors.Wrap(err, "Input section contains errors")
+		return PrependValidationErrorPath(err, "Input")
+	}
+
+	if t.Output == nil {
+		return &ValidationError{
+			ElementPath: []string{"Output"},
+			Message:     "section is empty",
+		}
 	}
 
 	if err := t.Output.Validate(); err != nil {
-		return errors.Wrap(err, "Output section contains errors")
+		return PrependValidationErrorPath(err, "Output")
 	}
 
 	return nil
 }
 
-// Merge merges the task with information in the Include.
-func (t *Task) Merge(include *Include) {
-	t.Input.Merge(&include.Input)
-	t.Output.Merge(&include.Output)
+func (t *Task) Merge(includeDB IncludeDB) error {
+	for _, includeID := range t.Includes {
+		if include, exist := includeDB.Inputs[includeID]; exist {
+			t.Input.Merge(include.Input)
+			continue
+		}
+
+		if include, exist := includeDB.Outputs[includeID]; exist {
+			t.Output.Merge(include.Output)
+			continue
+		}
+
+		return fmt.Errorf("could not find include with id '%s'", includeID)
+	}
+
+	return nil
+
+}
+
+// Merge for each ID in the Includes slice a TasksInclude in the includedb is looked up.
+// The tasks of the found TasksInclude are appended to the Apps Tasks slice.
+func (a *App) Merge(includedb *IncludeDB) error {
+	for _, includeID := range a.Includes {
+		include, exist := includedb.Tasks[includeID]
+		if !exist {
+			return fmt.Errorf("could not find include with id '%s'", includeID)
+		}
+
+		a.Tasks = append(a.Tasks, include.Tasks...)
+
+		// TODO: store the repository relative cfg path in the include somehow
+		//task.Input.Files.Paths = append(task.Input.Files.Paths, include.RelCfgPath)
+	}
+
+	return nil
 }
 
 // Merge merges the Input with another one.
@@ -270,11 +333,11 @@ func (i *Input) Merge(other *Input) {
 // Validate validates the Input section
 func (i *Input) Validate() error {
 	if err := i.Files.Validate(); err != nil {
-		return errors.Wrap(err, "Files")
+		return PrependValidationErrorPath(err, "Files")
 	}
 
 	if err := i.GolangSources.Validate(); err != nil {
-		return errors.Wrap(err, "GolangSources")
+		return PrependValidationErrorPath(err, "GolangSources")
 	}
 
 	// TODO: add validation for gitfiles section
@@ -285,12 +348,18 @@ func (i *Input) Validate() error {
 // Validate validates the GolangSources section
 func (g *GolangSources) Validate() error {
 	if len(g.Environment) != 0 && len(g.Paths) == 0 {
-		return errors.New("path must be set if environment is set")
+		return &ValidationError{
+			ElementPath: []string{"paths"},
+			Message:     "must be set if environment is set",
+		}
 	}
 
 	for _, p := range g.Paths {
 		if len(p) == 0 {
-			return errors.New("a path can not be empty")
+			return &ValidationError{
+				ElementPath: []string{"paths"},
+				Message:     "empty string is an invalid path",
+			}
 		}
 	}
 
@@ -313,13 +382,13 @@ func (o *Output) Merge(other *Output) {
 func (o *Output) Validate() error {
 	for _, f := range o.File {
 		if err := f.Validate(); err != nil {
-			return errors.Wrap(err, "File")
+			return PrependValidationErrorPath(err, "File")
 		}
 	}
 
 	for _, d := range o.DockerImage {
 		if err := d.Validate(); err != nil {
-			return errors.Wrap(err, "DockerImage")
+			return PrependValidationErrorPath(err, "DockerImage")
 		}
 	}
 
@@ -331,11 +400,6 @@ func (f *FileCopy) IsEmpty() bool {
 	return len(f.Path) == 0
 }
 
-// IsEmpty returns true if FileOutput is empty
-func (f *FileOutput) IsEmpty() bool {
-	return f.FileCopy.IsEmpty() && f.S3Upload.IsEmpty()
-}
-
 // IsEmpty returns true if S3Upload is empty
 func (s *S3Upload) IsEmpty() bool {
 	return len(s.Bucket) == 0 && len(s.DestFile) == 0
@@ -344,7 +408,10 @@ func (s *S3Upload) IsEmpty() bool {
 // Validate validates a [[Task.Output.File]] section
 func (f *FileOutput) Validate() error {
 	if len(f.Path) == 0 {
-		return errors.New("path can not be unset or empty")
+		return &ValidationError{
+			ElementPath: []string{"path"},
+			Message:     "can not be empty",
+		}
 	}
 
 	return f.S3Upload.Validate()
@@ -355,12 +422,6 @@ func (d *DockerImageRegistryUpload) IsEmpty() bool {
 	return len(d.Repository) == 0 && len(d.Tag) == 0
 }
 
-// IsEmpty returns true if DockerImageOutput is empty
-func (d *DockerImageOutput) IsEmpty() bool {
-	return len(d.IDFile) == 0 && d.RegistryUpload.IsEmpty()
-
-}
-
 // Validate validates a [[Task.Output.File]] section
 func (s *S3Upload) Validate() error {
 	if s.IsEmpty() {
@@ -368,11 +429,17 @@ func (s *S3Upload) Validate() error {
 	}
 
 	if len(s.DestFile) == 0 {
-		return errors.New("destfile parameter can not be unset or empty")
+		return &ValidationError{
+			ElementPath: []string{"destfile"},
+			Message:     "can not be empty",
+		}
 	}
 
 	if len(s.Bucket) == 0 {
-		return errors.New("bucket parameter can not be unset or empty")
+		return &ValidationError{
+			ElementPath: []string{"bucket"},
+			Message:     "can not be empty",
+		}
 	}
 
 	return nil
@@ -381,11 +448,14 @@ func (s *S3Upload) Validate() error {
 // Validate validates its content
 func (d *DockerImageOutput) Validate() error {
 	if len(d.IDFile) == 0 {
-		return errors.New("idfile parameter can not be unset or empty")
+		return &ValidationError{
+			ElementPath: []string{"idfile"},
+			Message:     "can not be empty",
+		}
 	}
 
 	if err := d.RegistryUpload.Validate(); err != nil {
-		return errors.Wrap(err, "") // TODO add section name to error msg
+		return PrependValidationErrorPath(err, "RegistryUpload")
 	}
 
 	return nil
@@ -394,11 +464,17 @@ func (d *DockerImageOutput) Validate() error {
 // Validate validates its content
 func (d *DockerImageRegistryUpload) Validate() error {
 	if len(d.Repository) == 0 {
-		return errors.New("repository parameter can not be unset or empty")
+		return &ValidationError{
+			ElementPath: []string{"repository"},
+			Message:     "can not be empty",
+		}
 	}
 
 	if len(d.Tag) == 0 {
-		return errors.New("tag parameter can not be unset or empty")
+		return &ValidationError{
+			ElementPath: []string{"tag"},
+			Message:     "can not be empty",
+		}
 	}
 
 	return nil
@@ -413,10 +489,17 @@ func (f *FileInputs) Merge(other *FileInputs) {
 func (f *FileInputs) Validate() error {
 	for _, path := range f.Paths {
 		if len(path) == 0 {
-			return errors.New("path can not be empty")
+			return &ValidationError{
+				ElementPath: []string{"path"},
+				Message:     "can not be empty",
+			}
+
 		}
 		if strings.Count(path, "**") > 1 {
-			return errors.New("'**' can only appear one time in a path")
+			return &ValidationError{
+				ElementPath: []string{"path"},
+				Message:     "'**' can only appear one time in a path",
+			}
 		}
 	}
 
