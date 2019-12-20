@@ -44,6 +44,7 @@ func FindRepositoryCwd() (*Repository, error) {
 	if err != nil {
 		return nil, err
 	}
+
 	return FindRepository(cwd)
 }
 
