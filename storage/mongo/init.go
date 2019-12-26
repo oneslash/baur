@@ -1,5 +1,5 @@
 package mongo
 
-func Init() {
+func (c *Client) Init() error {
 
 }
